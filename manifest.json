@@ -1,0 +1,17 @@
+{
+  "name": "语音智能助手",
+  "short_name": "语音助手",
+  "description": "基于语音识别和AI的智能对话助手",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0f23",
+  "theme_color": "#1a1a2e",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%236c63ff'/%3E%3Cpath d='M96 112a28 28 0 0 0 28-28V60a28 28 0 1 0-56 0v24a28 28 0 0 0 28 28z' fill='white'/%3E%3Cpath d='M128 90v6a32 32 0 0 1-64 0v-6H48v6a48 48 0 0 0 40 47.2V164h16v-20.8A48 48 0 0 0 144 96v-6z' fill='white'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

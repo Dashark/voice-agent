@@ -1,0 +1,719 @@
+/* ============================================================
+   语音智能助手 — UI 设计系统
+   设计理念: 声音是温暖的、有机的、对话的
+   签名元素: 声波光晕麦克风
+   ============================================================ */
+
+/* ============ 设计令牌 (Design Tokens) ============ */
+:root {
+  /* 背景 — 深邃夜空到星蓝渐变 */
+  --bg-deep: #0a0a1a;
+  --bg-gradient: radial-gradient(ellipse at 50% 0%, #14142e 0%, #0a0a1a 70%);
+
+  /* 表面 — 毛玻璃卡片 */
+  --surface-glass: rgba(255, 255, 255, 0.04);
+  --surface-glass-border: rgba(255, 255, 255, 0.08);
+  --surface-glass-hover: rgba(255, 255, 255, 0.08);
+
+  /* 文字 — 柔和高对比 */
+  --text-primary: #f0eeeb;
+  --text-secondary: rgba(240, 238, 235, 0.55);
+  --text-tertiary: rgba(240, 238, 235, 0.3);
+
+  /* 声波色彩 — 暖琥珀到玫红渐变，代表"声音的温度" */
+  --wave-start: #f97316;    /* 暖橙 */
+  --wave-mid: #ec4899;      /* 玫红 */
+  --wave-end: #a855f7;      /* 紫 */
+  --wave-glow: rgba(249, 115, 22, 0.3);
+
+  /* 语义色 */
+  --idle: rgba(240, 238, 235, 0.3);
+  --listening: #f97316;
+  --listening-glow: rgba(249, 115, 22, 0.5);
+  --processing: #a855f7;
+  --processing-glow: rgba(168, 85, 247, 0.4);
+  --speaking: #22d3ee;
+  --speaking-glow: rgba(34, 211, 238, 0.4);
+  --error: #f43f5e;
+
+  /* 消息气泡 */
+  --bubble-user: linear-gradient(135deg, #f97316, #ec4899);
+  --bubble-ai: rgba(255, 255, 255, 0.06);
+
+  /* 圆角 */
+  --radius-full: 9999px;
+  --radius-xl: 20px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+
+  /* 间距 */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* 动画 */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* 毛玻璃 */
+  --glass-blur: 20px;
+}
+
+/* ============ Reset ============ */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC', 'Helvetica Neue', sans-serif;
+  background: var(--bg-deep);
+  background-image: var(--bg-gradient);
+  color: var(--text-primary);
+  user-select: none;
+}
+
+/* ============ 全屏声波背景 (仅在录音/播放时显示) ============ */
+.ambient-waves {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.8s var(--ease-smooth);
+}
+
+.ambient-waves.active {
+  opacity: 1;
+}
+
+.ambient-waves .wave-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 300px;
+  height: 300px;
+  margin: -150px 0 0 -150px;
+  border-radius: 50%;
+  border: 1px solid rgba(249, 115, 22, 0.15);
+  animation: waveExpand 4s ease-out infinite;
+}
+
+.ambient-waves .wave-ring:nth-child(2) { animation-delay: 1.3s; }
+.ambient-waves .wave-ring:nth-child(3) { animation-delay: 2.6s; }
+
+@keyframes waveExpand {
+  0%   { transform: scale(0.5); opacity: 0.6; }
+  100% { transform: scale(3); opacity: 0; }
+}
+
+/* ============ App Shell ============ */
+.app-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 1;
+}
+
+/* ============ Header ============ */
+.app-header {
+  padding: 12px 16px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.app-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  background: linear-gradient(135deg, var(--wave-start), var(--wave-end));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 4px 4px;
+  background: var(--surface-glass);
+  border: 1px solid var(--surface-glass-border);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: all 0.3s var(--ease-smooth);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--idle);
+  transition: all 0.4s var(--ease-smooth);
+}
+
+.status-dot.idle {
+  background: var(--idle);
+  box-shadow: none;
+}
+
+.status-dot.listening {
+  background: var(--listening);
+  box-shadow: 0 0 12px var(--listening-glow);
+  animation: dotPulse 1s var(--ease-smooth) infinite;
+}
+
+.status-dot.processing {
+  background: var(--processing);
+  box-shadow: 0 0 12px var(--processing-glow);
+  animation: dotPulse 0.6s var(--ease-smooth) infinite;
+}
+
+.status-dot.speaking {
+  background: var(--speaking);
+  box-shadow: 0 0 12px var(--speaking-glow);
+  animation: dotPulse 0.8s var(--ease-smooth) infinite;
+}
+
+@keyframes dotPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.6; }
+}
+
+/* ============ 聊天区域 ============ */
+.chat-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 16px 8px;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat-container::-webkit-scrollbar { width: 3px; }
+.chat-container::-webkit-scrollbar-thumb {
+  background: var(--surface-glass);
+  border-radius: 2px;
+}
+
+/* 聊天内容底部留白，让最后一条消息不被麦克风挡住 */
+.chat-container::after {
+  content: '';
+  display: block;
+  height: 100px;
+}
+
+/* ============ 消息 ============ */
+.message {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 20px;
+  animation: msgIn 0.35s var(--ease-spring);
+}
+
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.message.user { align-items: flex-end; }
+.message.assistant { align-items: flex-start; }
+
+.message-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  margin: 0 12px 4px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.message-bubble {
+  max-width: 82%;
+  padding: 12px 18px;
+  font-size: 15px;
+  line-height: 1.65;
+  word-break: break-word;
+  position: relative;
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+.message.user .message-bubble {
+  background: var(--bubble-user);
+  color: white;
+  border-radius: var(--radius-xl) var(--radius-xl) 4px var(--radius-xl);
+  box-shadow: 0 4px 20px rgba(249, 115, 22, 0.2);
+}
+
+.message.assistant .message-bubble {
+  background: var(--surface-glass);
+  border: 1px solid var(--surface-glass-border);
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xl) 4px;
+  color: var(--text-primary);
+}
+
+/* ============ 实时识别文字 (Interim) ============ */
+.interim-text {
+  display: none;
+  text-align: center;
+  padding: 10px 20px;
+  margin: 0 auto 12px;
+  max-width: 85%;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--surface-glass);
+  border: 1px solid var(--surface-glass-border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(var(--glass-blur));
+  animation: interimPulse 1.2s var(--ease-smooth) infinite;
+}
+
+.interim-text.active { display: block; }
+
+@keyframes interimPulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* ============ 打字指示器 ============ */
+.typing-indicator {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  padding: 14px 20px;
+  background: var(--surface-glass);
+  border: 1px solid var(--surface-glass-border);
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xl) 4px;
+  margin-bottom: 20px;
+  align-self: flex-start;
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+.typing-indicator.active { display: flex; }
+
+.typing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--wave-start), var(--wave-mid));
+  animation: typingBounce 1.2s var(--ease-spring) infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-10px); }
+}
+
+/* ============ 底部控制栏 ============ */
+.control-bar {
+  flex-shrink: 0;
+  padding: 16px 24px calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 2;
+}
+
+/* ============ 声波可视化 ============ */
+.waveform-container {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: all 0.4s var(--ease-smooth);
+  pointer-events: none;
+}
+
+.waveform-container.active {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.waveform-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(to top, var(--wave-start), var(--wave-mid));
+  height: 4px;
+  transition: height 0.08s var(--ease-out);
+  min-height: 3px;
+}
+
+/* ============ 麦克风按钮 (签名元素) ============ */
+.mic-btn {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: none;
+  background: var(--surface-glass);
+  border: 1.5px solid var(--surface-glass-border);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transition: all 0.35s var(--ease-spring);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  outline: none;
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+/* 麦克风光晕（始终存在，作为签名元素） */
+.mic-btn::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg,
+    var(--wave-start), var(--wave-mid), var(--wave-end),
+    transparent 60%, transparent 80%, var(--wave-start));
+  opacity: 0.15;
+  transition: opacity 0.5s var(--ease-smooth);
+  animation: glowRotate 6s linear infinite;
+  z-index: -1;
+}
+
+@keyframes glowRotate {
+  to { transform: rotate(360deg); }
+}
+
+.mic-btn:active {
+  transform: scale(0.92);
+}
+
+/* 录音状态 */
+.mic-btn.recording {
+  border-color: var(--listening);
+  background: rgba(249, 115, 22, 0.1);
+}
+
+.mic-btn.recording::before {
+  opacity: 0.6;
+  animation-duration: 2s;
+}
+
+.mic-btn.recording::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  border: 1px solid rgba(249, 115, 22, 0.2);
+  animation: micRing 1.5s ease-out infinite;
+}
+
+@keyframes micRing {
+  0%   { transform: scale(0.85); opacity: 0.6; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+.mic-icon {
+  width: 28px;
+  height: 28px;
+  fill: var(--text-primary);
+  transition: all 0.3s var(--ease-smooth);
+}
+
+.mic-btn.recording .mic-icon {
+  fill: var(--listening);
+}
+
+.mic-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.3px;
+  transition: color 0.3s;
+}
+
+.mic-btn.recording .mic-label {
+  color: var(--listening);
+}
+
+/* ============ 设置按钮 ============ */
+.settings-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--surface-glass-border);
+  background: var(--surface-glass);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s var(--ease-smooth);
+  backdrop-filter: blur(var(--glass-blur));
+  flex-shrink: 0;
+}
+
+.settings-btn:active {
+  background: var(--surface-glass-hover);
+  transform: scale(0.92);
+}
+
+.settings-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+/* ============ 设置面板 (底部弹出) ============ */
+.settings-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  justify-content: center;
+  align-items: flex-end;
+  backdrop-filter: blur(4px);
+}
+
+.settings-overlay.active { display: flex; }
+
+.settings-panel {
+  width: 100%;
+  max-height: 82vh;
+  background: rgba(20, 20, 46, 0.95);
+  backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--surface-glass-border);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  padding: 24px 20px calc(20px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  animation: panelSlideUp 0.4s var(--ease-spring);
+}
+
+@keyframes panelSlideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* 面板拖拽手柄 */
+.settings-panel::before {
+  content: '';
+  display: block;
+  width: 36px;
+  height: 4px;
+  background: var(--text-tertiary);
+  border-radius: 2px;
+  margin: 0 auto 20px;
+}
+
+.settings-panel h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  letter-spacing: -0.3px;
+}
+
+.settings-group {
+  margin-bottom: 16px;
+}
+
+.settings-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  letter-spacing: 0.3px;
+}
+
+.settings-group select,
+.settings-group input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--surface-glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s var(--ease-smooth);
+  appearance: none;
+}
+
+.settings-group select:focus,
+.settings-group input:focus {
+  border-color: var(--wave-start);
+}
+
+.settings-group input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.settings-group select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='rgba(240,238,235,0.4)'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.settings-actions button {
+  flex: 1;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-smooth);
+}
+
+.btn-save {
+  background: linear-gradient(135deg, var(--wave-start), var(--wave-mid));
+  color: white;
+  box-shadow: 0 4px 16px rgba(249, 115, 22, 0.3);
+}
+
+.btn-save:active { transform: scale(0.97); opacity: 0.9; }
+
+.btn-cancel {
+  background: var(--surface-glass);
+  border: 1px solid var(--surface-glass-border);
+  color: var(--text-secondary);
+}
+
+.btn-cancel:active { transform: scale(0.97); }
+
+/* ============ Toast 通知 ============ */
+.toast {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  font-weight: 500;
+  z-index: 200;
+  animation: toastIn 0.3s var(--ease-spring);
+  pointer-events: none;
+  backdrop-filter: blur(var(--glass-blur));
+  white-space: nowrap;
+}
+
+.toast.error {
+  background: rgba(244, 63, 94, 0.9);
+  color: white;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.toast.success {
+  background: rgba(34, 211, 238, 0.2);
+  color: var(--speaking);
+  border: 1px solid rgba(34, 211, 238, 0.2);
+}
+
+.toast.info {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.2);
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ============ 欢迎空状态 ============ */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  height: 100%;
+  padding: 40px 20px;
+  opacity: 0.6;
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 16px;
+  fill: none;
+  stroke: var(--text-tertiary);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.empty-state-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.empty-state-hint {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+/* ============ 响应式 ============ */
+@media (min-width: 768px) {
+  .app-shell {
+    max-width: 420px;
+    margin: 0 auto;
+    border-left: 1px solid var(--surface-glass-border);
+    border-right: 1px solid var(--surface-glass-border);
+  }
+
+  .settings-panel {
+    max-width: 420px;
+    margin: 0 auto;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+}
+
+/* 安全区域适配 */
+@supports (padding: max(0px)) {
+  .control-bar {
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 16px));
+  }
+}
+
+/* 减少动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

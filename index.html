@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a1a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="manifest.json" />
+  <title>语音助手</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 环境声波背景 -->
+  <div class="ambient-waves" id="ambientWaves">
+    <div class="wave-ring"></div>
+    <div class="wave-ring"></div>
+    <div class="wave-ring"></div>
+  </div>
+
+  <!-- 应用主体 -->
+  <div class="app-shell">
+    <!-- 顶部栏 -->
+    <header class="app-header">
+      <span class="app-title">语音助手</span>
+      <div class="status-indicator" id="statusIndicator">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">准备就绪</span>
+      </div>
+    </header>
+
+    <!-- 聊天区域 -->
+    <main class="chat-container" id="chatContainer">
+      <!-- 空状态（JS 动态渲染） -->
+      <div class="empty-state" id="emptyState">
+        <svg class="empty-state-icon" viewBox="0 0 48 48">
+          <path d="M24 32a8 8 0 0 0 8-8V14a8 8 0 1 0-16 0v10a8 8 0 0 0 8 8z"/>
+          <path d="M36 22v2a12 12 0 0 1-24 0v-2"/>
+          <path d="M24 36v6"/>
+          <path d="M18 42h12"/>
+        </svg>
+        <div class="empty-state-title">按住麦克风开始对话</div>
+        <div class="empty-state-hint">支持语音识别、AI 智能回复、自动语音朗读</div>
+      </div>
+
+      <!-- 实时识别文字 -->
+      <div class="interim-text" id="interimText"></div>
+
+      <!-- 打字指示器 -->
+      <div class="typing-indicator" id="typingIndicator">
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+      </div>
+    </main>
+
+    <!-- 底部控制栏 -->
+    <footer class="control-bar">
+      <!-- 声波可视化 -->
+      <div class="waveform-container" id="waveform">
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+        <div class="waveform-bar"></div><div class="waveform-bar"></div>
+      </div>
+
+      <!-- 麦克风按钮 -->
+      <button class="mic-btn" id="micBtn" aria-label="开始录音">
+        <svg viewBox="0 0 24 24" class="mic-icon" id="micIcon">
+          <path d="M12 14a4 4 0 0 0 4-4V6a4 4 0 1 0-8 0v4a4 4 0 0 0 4 4Z"/>
+          <path d="M19 10v1a7 7 0 0 1-14 0v-1H3v1a9 9 0 0 0 8 8.94V22h2v-2.06A9 9 0 0 0 21 11v-1Z"/>
+        </svg>
+        <span class="mic-label" id="micLabel">按住说话</span>
+      </button>
+    </footer>
+  </div>
+
+  <!-- 设置按钮 -->
+  <button class="settings-btn" id="settingsBtn" aria-label="设置">
+    <svg viewBox="0 0 24 24">
+      <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>
+    </svg>
+  </button>
+
+  <!-- 设置面板 -->
+  <div class="settings-overlay" id="settingsOverlay">
+    <div class="settings-panel">
+      <h2>配置</h2>
+
+      <div class="settings-group">
+        <label>语音识别 (ASR)</label>
+        <select id="asrProvider">
+          <option value="webspeech">Web Speech API</option>
+          <option value="mimo">小米 MiMo ASR</option>
+        </select>
+      </div>
+
+      <div class="settings-group mimo-config" id="mimoConfig" style="display:none">
+        <label>MiMo App ID</label>
+        <input type="text" id="mimoAppId" placeholder="输入 App ID" />
+        <label style="margin-top:12px">MiMo Token</label>
+        <input type="text" id="mimoToken" placeholder="输入 Token" />
+      </div>
+
+      <div class="settings-group">
+        <label>LLM API 地址</label>
+        <input type="url" id="llmEndpoint" value="https://api.xiaomimimo.com/v1/chat/completions" />
+      </div>
+
+      <div class="settings-group">
+        <label>API Key</label>
+        <input type="password" id="llmApiKey" placeholder="sk-..." />
+      </div>
+
+      <div class="settings-group">
+        <label>模型</label>
+        <input type="text" id="llmModel" value="mimo-v2.5-pro" />
+      </div>
+
+      <div class="settings-group">
+        <label>语音合成 (TTS)</label>
+        <select id="ttsProvider">
+          <option value="webspeech">Web Speech API (浏览器)</option>
+          <option value="mimo">小米 MiMo TTS (更自然)</option>
+        </select>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn-cancel" id="settingsCancel">取消</button>
+        <button class="btn-save" id="settingsSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
