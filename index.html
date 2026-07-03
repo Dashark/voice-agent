@@ -99,29 +99,14 @@
     <div class="settings-panel">
       <h2>配置</h2>
 
-      <div class="settings-group">
-        <label>语音识别 (ASR)</label>
-        <select id="asrProvider">
-          <option value="webspeech">Web Speech API</option>
-          <option value="mimo">小米 MiMo ASR</option>
-        </select>
-      </div>
-
-      <div class="settings-group mimo-config" id="mimoConfig" style="display:none">
-        <label>MiMo App ID</label>
-        <input type="text" id="mimoAppId" placeholder="输入 App ID" />
-        <label style="margin-top:12px">MiMo Token</label>
-        <input type="text" id="mimoToken" placeholder="输入 Token" />
-      </div>
-
-      <div class="settings-group">
-        <label>LLM API 地址</label>
-        <input type="url" id="llmEndpoint" value="https://api.xiaomimimo.com/v1/chat/completions" />
+      <!-- ====== AI 模型 (LLM) - 必填 ====== -->
+      <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--surface-glass-border)">
+        🤖 AI 模型（必填）
       </div>
 
       <div class="settings-group">
         <label>API Key</label>
-        <input type="password" id="llmApiKey" placeholder="sk-..." />
+        <input type="password" id="llmApiKey" placeholder="sk-... 用于 mimo-v2.5-pro 模型" />
       </div>
 
       <div class="settings-group">
@@ -130,10 +115,33 @@
       </div>
 
       <div class="settings-group">
-        <label>语音合成 (TTS)</label>
+        <label>API 地址</label>
+        <input type="url" id="llmEndpoint" value="https://api.xiaomimimo.com/v1/chat/completions" />
+      </div>
+
+      <!-- ====== 语音识别 (ASR) ====== -->
+      <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin:20px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--surface-glass-border)">
+        🎤 语音识别
+      </div>
+
+      <div class="settings-group">
+        <label>引擎</label>
+        <select id="asrProvider">
+          <option value="mimo" selected>小米 MiMo ASR（推荐）</option>
+          <option value="webspeech">Web Speech API（浏览器）</option>
+        </select>
+      </div>
+
+      <!-- ====== 语音合成 (TTS) ====== -->
+      <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin:20px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--surface-glass-border)">
+        🔊 语音合成
+      </div>
+
+      <div class="settings-group">
+        <label>引擎</label>
         <select id="ttsProvider">
-          <option value="webspeech">Web Speech API (浏览器)</option>
-          <option value="mimo">小米 MiMo TTS (更自然)</option>
+          <option value="mimo" selected>小米 MiMo TTS（推荐，音质更好）</option>
+          <option value="webspeech">Web Speech API（浏览器）</option>
         </select>
       </div>
 

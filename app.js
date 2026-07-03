@@ -39,9 +39,6 @@ function cacheDom() {
   dom.settingsSave = $('#settingsSave');
   dom.settingsCancel = $('#settingsCancel');
   dom.asrProvider = $('#asrProvider');
-  dom.mimoConfig = $('#mimoConfig');
-  dom.mimoAppId = $('#mimoAppId');
-  dom.mimoToken = $('#mimoToken');
   dom.llmEndpoint = $('#llmEndpoint');
   dom.llmApiKey = $('#llmApiKey');
   dom.llmModel = $('#llmModel');
@@ -59,13 +56,11 @@ function cacheDom() {
 const CONFIG_KEY = 'voice_agent_config';
 
 const defaultConfig = {
-  asrProvider: 'webspeech',
-  mimoAppId: '',
-  mimoToken: '',
+  asrProvider: 'mimo',
   llmEndpoint: 'https://api.xiaomimimo.com/v1/chat/completions',
   llmApiKey: '',
   llmModel: 'mimo-v2.5-pro',
-  ttsProvider: 'webspeech',
+  ttsProvider: 'mimo',
   systemPrompt: '你是MiMo，是小米公司研发的AI智能助手。请用中文简洁地回答用户的问题。直接给出答案，不要多余的解释。',
 };
 
@@ -179,7 +174,7 @@ function setState(newState) {
   const statusMap = {
     [State.IDLE]: '准备就绪',
     [State.LISTENING]: '聆听中…',
-    [State.PROCESSING]: '思考中…',
+    [State.PROCESSING]: '处理中…',
     [State.SPEAKING]: '播放中…',
   };
   dom.statusText.textContent = statusMap[newState] || '准备就绪';
@@ -328,6 +323,12 @@ async function callLLM(userText) {
   // 构建请求头 — 同时支持 Authorization: Bearer 和 api-key 两种认证
   const headers = { 'Content-Type': 'application/json' };
   const key = config.llmApiKey.trim();
+  if (!key) {
+    showTyping(false);
+    showToast('请先在设置中配置 API Key', 'error');
+    setState(State.IDLE);
+    return;
+  }
   if (key.startsWith('sk-') || key.startsWith('tp-')) {
     // MiMo 风格 Key：优先用 api-key 头（MiMo 推荐方式）
     headers['api-key'] = key;
@@ -394,19 +395,18 @@ async function callLLM(userText) {
 }
 
 // ============================================================
-// MiMo ASR (WebSocket)
+// MiMo ASR (HTTP API — PCM → WAV → base64)
 // ============================================================
 class MiMoASR {
-  constructor(appId, token) {
-    this.appId = appId;
-    this.token = token;
-    this.ws = null;
-    this.mediaRecorder = null;
+  constructor(apiKey) {
+    this.apiKey = apiKey;
     this.stream = null;
+    this.audioContext = null;
+    this.mediaRecorder = null;
+    this.chunks = [];
     this.onResult = null;
     this.onInterim = null;
     this.onError = null;
-    this.isConnected = false;
   }
 
   async start() {
@@ -416,52 +416,18 @@ class MiMoASR {
       throw new Error('无法访问麦克风: ' + err.message);
     }
 
-    const wsUrl = `wss://asr.mimo.mi.com/v1/asr?app_id=${this.appId}&token=${this.token}`;
+    this.chunks = [];
 
-    return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(wsUrl);
-      } catch (err) {
-        this.cleanup();
-        reject(new Error('WebSocket 连接失败'));
-        return;
+    // 用 MediaRecorder 录制，尝试 mp3 格式（MiMo 支持 wav/mp3，不支持 webm）
+    const mimeTypes = ['audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/wave'];
+    let opts = {};
+    for (const mt of mimeTypes) {
+      if (MediaRecorder.isTypeSupported(mt)) {
+        opts = { mimeType: mt };
+        break;
       }
+    }
 
-      this.ws.onopen = () => {
-        this.isConnected = true;
-        this.startRecording();
-        resolve();
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'result' && data.text) {
-            this.onResult?.(data.text);
-          } else if (data.type === 'interim' && data.text) {
-            this.onInterim?.(data.text);
-          }
-        } catch { /* binary data, ignore */ }
-      };
-
-      this.ws.onerror = () => {
-        this.cleanup();
-        reject(new Error('WebSocket 连接错误'));
-      };
-
-      this.ws.onclose = () => { this.isConnected = false; };
-
-      setTimeout(() => {
-        if (!this.isConnected) {
-          this.cleanup();
-          reject(new Error('WebSocket 连接超时'));
-        }
-      }, 10000);
-    });
-  }
-
-  startRecording() {
-    const opts = { mimeType: 'audio/webm;codecs=opus' };
     try {
       this.mediaRecorder = new MediaRecorder(this.stream, opts);
     } catch {
@@ -469,8 +435,8 @@ class MiMoASR {
     }
 
     this.mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0 && this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(event.data);
+      if (event.data.size > 0) {
+        this.chunks.push(event.data);
       }
     };
 
@@ -479,18 +445,106 @@ class MiMoASR {
 
   stop() {
     return new Promise((resolve) => {
-      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-        this.mediaRecorder.onstop = () => {
-          if (this.ws?.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({ type: 'end' }));
-          }
-          setTimeout(() => { this.cleanup(); resolve(); }, 500);
-        };
-        this.mediaRecorder.stop();
-      } else {
+      if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
         this.cleanup();
-        resolve();
+        resolve('');
+        return;
       }
+
+      this.mediaRecorder.onstop = async () => {
+        this.stream?.getTracks().forEach(t => t.stop());
+        this.stream = null;
+
+        const blob = new Blob(this.chunks);
+        this.chunks = [];
+
+        try {
+          const buffer = await blob.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+
+          // 检测实际格式
+          const isWav = blob.type.includes('wav') || blob.type.includes('wave');
+          const isMp3 = blob.type.includes('mp3') || blob.type.includes('mpeg');
+
+          let base64;
+          let mimeType;
+
+          if (isWav) {
+            // WAV 格式直接传
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            base64 = btoa(binary);
+            mimeType = 'audio/wav';
+          } else if (isMp3) {
+            // MP3 格式直接传
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            base64 = btoa(binary);
+            mimeType = 'audio/mpeg';
+          } else {
+            // webm/opus → 转成 WAV（AudioContext decode + encode）
+            mimeType = 'audio/wav';
+            base64 = await convertWebmToWavBase64(buffer);
+          }
+
+          const dataUrl = `data:${mimeType};base64,${base64}`;
+
+          // 调用 MiMo ASR API
+          const headers = { 'Content-Type': 'application/json' };
+          if (this.apiKey.startsWith('sk-') || this.apiKey.startsWith('tp-')) {
+            headers['api-key'] = this.apiKey;
+          } else {
+            headers['Authorization'] = `Bearer ${this.apiKey}`;
+          }
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+          const response = await fetch(config.llmEndpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              model: 'mimo-v2.5-asr',
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'input_audio',
+                      input_audio: { data: dataUrl },
+                    },
+                  ],
+                },
+              ],
+              asr_options: { language: 'zh' },
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            throw new Error(`ASR ${response.status}: ${errText.slice(0, 100)}`);
+          }
+
+          const data = await response.json();
+          const text = data.choices?.[0]?.message?.content || '';
+          this.onResult?.(text);
+          resolve(text);
+        } catch (err) {
+          this.onError?.(err.message);
+          resolve('');
+        }
+
+        this.mediaRecorder = null;
+      };
+
+      this.mediaRecorder.stop();
     });
   }
 
@@ -499,11 +553,75 @@ class MiMoASR {
       this.mediaRecorder.stop();
     }
     this.stream?.getTracks().forEach(t => t.stop());
-    this.ws?.close();
     this.stream = null;
     this.mediaRecorder = null;
-    this.ws = null;
-    this.isConnected = false;
+    this.chunks = [];
+  }
+}
+
+// webm → WAV 转换（用 AudioContext 解码后重编码）
+async function convertWebmToWavBase64(webmBuffer) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await ctx.decodeAudioData(webmBuffer.slice(0));
+    const numChannels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length;
+    const channelData = [];
+    for (let ch = 0; ch < numChannels; ch++) {
+      channelData.push(audioBuffer.getChannelData(ch));
+    }
+
+    // 编码为 WAV
+    const bitsPerSample = 16;
+    const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+    const blockAlign = numChannels * bitsPerSample / 8;
+    const dataSize = length * numChannels * bitsPerSample / 8;
+    const headerSize = 44;
+    const totalSize = headerSize + dataSize;
+
+    const wavBuffer = new ArrayBuffer(totalSize);
+    const view = new DataView(wavBuffer);
+
+    const writeString = (offset, str) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, totalSize - 8, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    let offset = 44;
+    for (let i = 0; i < length; i++) {
+      for (let ch = 0; ch < numChannels; ch++) {
+        const sample = Math.max(-1, Math.min(1, channelData[ch][i]));
+        const val = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+        view.setInt16(offset, val, true);
+        offset += 2;
+      }
+    }
+
+    const wavBytes = new Uint8Array(wavBuffer);
+    let binary = '';
+    for (let i = 0; i < wavBytes.length; i++) {
+      binary += String.fromCharCode(wavBytes[i]);
+    }
+    return btoa(binary);
+  } catch {
+    // 如果转换失败，返回空字符串
+    return '';
   }
 }
 
@@ -580,12 +698,13 @@ class WebSpeechASR {
 // ============================================================
 function createASR() {
   if (config.asrProvider === 'mimo') {
-    if (!config.mimoAppId || !config.mimoToken) {
-      showToast('请先配置 MiMo ASR 的 App ID 和 Token', 'error');
+    if (!config.llmApiKey.trim()) {
+      showToast('使用 MiMo ASR 需要先配置 API Key', 'error');
       return null;
     }
-    return new MiMoASR(config.mimoAppId, config.mimoToken);
+    return new MiMoASR(config.llmApiKey.trim());
   }
+  // Web Speech API 不需要 Key，浏览器原生支持
   return new WebSpeechASR();
 }
 
@@ -650,6 +769,56 @@ function stopWaveform() {
 }
 
 // ============================================================
+// 文本修正节点 — 修复 ASR 同音错别字和不通顺
+// ============================================================
+async function correctTranscript(text) {
+  if (!text || text.length < 2) return text;
+
+  const headers = { 'Content-Type': 'application/json' };
+  const key = config.llmApiKey.trim();
+  if (key.startsWith('sk-') || key.startsWith('tp-')) {
+    headers['api-key'] = key;
+  } else {
+    headers['Authorization'] = `Bearer ${key}`;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(config.llmEndpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: config.llmModel,
+        messages: [
+          {
+            role: 'system',
+            content: '你是语音识别文本修正助手。你的任务：1. 修正同音错别字 2. 补充缺失的标点 3. 让句子通顺 4. **绝对不要改变原意** 5. **只输出修正后的文本，不要任何解释**',
+          },
+          { role: 'user', content: text },
+        ],
+        max_completion_tokens: 512,
+        temperature: 0.1,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) return text;
+
+    const data = await response.json();
+    const corrected = data.choices?.[0]?.message?.content?.trim();
+    return corrected || text;
+  } catch {
+    clearTimeout(timeoutId);
+    return text; // 修正失败就用原文
+  }
+}
+
+// ============================================================
 // 录音流程
 // ============================================================
 async function startListening() {
@@ -696,8 +865,8 @@ async function stopListening(cancel = false) {
     if (asrInstance instanceof WebSpeechASR) {
       transcript = asrInstance.stop();
     } else {
-      await asrInstance.stop();
-      transcript = pendingTranscript;
+      // MiMoASR.stop() 返回识别结果文字
+      transcript = await asrInstance.stop();
     }
   } catch (err) {
     console.error('Stop ASR error:', err);
@@ -710,101 +879,96 @@ async function stopListening(cancel = false) {
     return;
   }
 
-  addMessage('user', transcript.trim());
+  const finalText = transcript.trim();
+
+  // 🔧 文本修正节点 — 修正 ASR 同音错别字
+  setState(State.PROCESSING);
+  dom.statusText.textContent = '修正中…';
+  const corrected = await correctTranscript(finalText);
+
+  // 显示修正后的用户文字
+  addMessage('user', corrected);
   showInterim('');
-  await callLLM(transcript.trim());
+  await callLLM(corrected);
 }
 
 // ============================================================
-// 交互控制
+// 绑定事件
 // ============================================================
-// 鼠标
-dom.micBtn.addEventListener('mousedown', (e) => {
-  e.preventDefault();
-  if (state === State.IDLE) startListening();
-});
-
-dom.micBtn.addEventListener('mouseup', (e) => {
-  e.preventDefault();
-  if (state === State.LISTENING) stopListening();
-});
-
-dom.micBtn.addEventListener('mouseleave', () => {
-  if (state === State.LISTENING) stopListening();
-});
-
-// 触摸
-dom.micBtn.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  if (state === State.IDLE) startListening();
-}, { passive: false });
-
-dom.micBtn.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  if (state === State.LISTENING) stopListening();
-}, { passive: false });
-
-dom.micBtn.addEventListener('touchcancel', () => {
-  if (state === State.LISTENING) stopListening();
-});
-
-// 空格键
-document.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.key === ' ' && !e.repeat && state === State.IDLE) {
+function bindEvents() {
+  // 麦克风 - 鼠标
+  dom.micBtn.addEventListener('mousedown', (e) => {
     e.preventDefault();
-    startListening();
-  }
-});
-
-document.addEventListener('keyup', (e) => {
-  if (e.key === ' ' && !e.repeat && state === State.LISTENING) {
+    if (state === State.IDLE) startListening();
+  });
+  dom.micBtn.addEventListener('mouseup', (e) => {
     e.preventDefault();
-    stopListening();
-  }
-});
+    if (state === State.LISTENING) stopListening();
+  });
+  dom.micBtn.addEventListener('mouseleave', () => {
+    if (state === State.LISTENING) stopListening();
+  });
 
-// ============================================================
-// 设置面板
-// ============================================================
-dom.settingsBtn.addEventListener('click', () => {
-  dom.asrProvider.value = config.asrProvider;
-  dom.mimoAppId.value = config.mimoAppId;
-  dom.mimoToken.value = config.mimoToken;
-  dom.llmEndpoint.value = config.llmEndpoint;
-  dom.llmApiKey.value = config.llmApiKey;
-  dom.llmModel.value = config.llmModel;
-  dom.ttsProvider.value = config.ttsProvider;
-  dom.mimoConfig.style.display = config.asrProvider === 'mimo' ? 'block' : 'none';
-  dom.settingsOverlay.classList.add('active');
-});
+  // 麦克风 - 触摸
+  dom.micBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (state === State.IDLE) startListening();
+  }, { passive: false });
+  dom.micBtn.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (state === State.LISTENING) stopListening();
+  }, { passive: false });
+  dom.micBtn.addEventListener('touchcancel', () => {
+    if (state === State.LISTENING) stopListening();
+  });
 
-dom.asrProvider.addEventListener('change', () => {
-  dom.mimoConfig.style.display = dom.asrProvider.value === 'mimo' ? 'block' : 'none';
-});
+  // 空格键
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.key === ' ' && !e.repeat && state === State.IDLE) {
+      e.preventDefault();
+      startListening();
+    }
+  });
+  document.addEventListener('keyup', (e) => {
+    if (e.key === ' ' && !e.repeat && state === State.LISTENING) {
+      e.preventDefault();
+      stopListening();
+    }
+  });
 
-dom.settingsCancel.addEventListener('click', () => {
-  dom.settingsOverlay.classList.remove('active');
-});
+  // 设置按钮
+  dom.settingsBtn.addEventListener('click', () => {
+    dom.asrProvider.value = config.asrProvider;
+    dom.llmEndpoint.value = config.llmEndpoint;
+    dom.llmApiKey.value = config.llmApiKey;
+    dom.llmModel.value = config.llmModel;
+    dom.ttsProvider.value = config.ttsProvider;
+    dom.settingsOverlay.classList.add('active');
+  });
 
-dom.settingsSave.addEventListener('click', () => {
-  config.asrProvider = dom.asrProvider.value;
-  config.mimoAppId = dom.mimoAppId.value.trim();
-  config.mimoToken = dom.mimoToken.value.trim();
-  config.llmEndpoint = dom.llmEndpoint.value.trim();
-  config.llmApiKey = dom.llmApiKey.value.trim();
-  config.llmModel = dom.llmModel.value.trim();
-  config.ttsProvider = dom.ttsProvider.value;
-  saveConfig();
-  dom.settingsOverlay.classList.remove('active');
-  showToast('配置已保存', 'success');
-});
-
-dom.settingsOverlay.addEventListener('click', (e) => {
-  if (e.target === dom.settingsOverlay) {
+  // 设置面板按钮
+  dom.settingsCancel.addEventListener('click', () => {
     dom.settingsOverlay.classList.remove('active');
-  }
-});
+  });
+  dom.settingsSave.addEventListener('click', () => {
+    config.asrProvider = dom.asrProvider.value;
+    config.llmEndpoint = dom.llmEndpoint.value.trim();
+    config.llmApiKey = dom.llmApiKey.value.trim();
+    config.llmModel = dom.llmModel.value.trim();
+    config.ttsProvider = dom.ttsProvider.value;
+    saveConfig();
+    dom.settingsOverlay.classList.remove('active');
+    showToast('配置已保存', 'success');
+  });
+
+  // 点击遮罩关闭
+  dom.settingsOverlay.addEventListener('click', (e) => {
+    if (e.target === dom.settingsOverlay) {
+      dom.settingsOverlay.classList.remove('active');
+    }
+  });
+}
 
 // ============================================================
 // 初始化
@@ -812,6 +976,7 @@ dom.settingsOverlay.addEventListener('click', (e) => {
 function init() {
   cacheDom();
   loadConfig();
+  bindEvents();
   setState(State.IDLE);
 
   // 预加载语音
