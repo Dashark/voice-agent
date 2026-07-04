@@ -87,13 +87,22 @@ function saveConfig() {
 let state = State.IDLE;
 let conversationHistory = [];
 let recognition = null;
-let speechSynth = window.speechSynthesis;
+let speechSynth = window.speechSynthesis || null;
 let currentUtterance = null;
 let audioContext = null;
 let waveformAnimationId = null;
 let mediaStream = null;
 let asrInstance = null;
 let pendingTranscript = '';
+let audioUnlocked = false;
+let activeTtsSource = null;
+
+function getSpeechSynth() {
+  if (!speechSynth && 'speechSynthesis' in window) {
+    speechSynth = window.speechSynthesis || null;
+  }
+  return speechSynth;
+}
 
 // ============================================================
 // 消息渲染
@@ -194,17 +203,20 @@ function speakText(text) {
   return new Promise((resolve) => {
     if (!text || !text.trim()) return resolve();
 
+    const synth = getSpeechSynth();
+
     // 停止当前播放
-    if (speechSynth.speaking) {
-      speechSynth.cancel();
+    if (synth?.speaking) {
+      synth.cancel();
     }
 
     setState(State.SPEAKING);
 
-    if (config.ttsProvider === 'mimo') {
-      speakWithMiMo(text).then(resolve).catch(() => {
+    // 只有在配置了 API Key 并且明确选择了 MiMo 时才尝试 MiMo TTS
+    if (config.ttsProvider === 'mimo' && config.llmApiKey.trim()) {
+      speakWithMiMo(text).then(resolve).catch((err) => {
         // MiMo TTS 失败时回退到 Web Speech
-        console.warn('MiMo TTS failed, falling back to Web Speech');
+        console.warn('MiMo TTS failed, falling back to Web Speech', err);
         speakWithWebSpeech(text).then(resolve);
       });
     } else {
@@ -213,14 +225,112 @@ function speakText(text) {
   });
 }
 
+async function unlockAudioPlayback() {
+  try {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+    const buffer = audioContext.createBuffer(1, 1, 22050);
+    const source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioContext.destination);
+    source.start(0);
+    audioUnlocked = true;
+
+    const synth = getSpeechSynth();
+    if (synth) {
+      synth.resume?.();
+    }
+  } catch (err) {
+    console.warn('Audio unlock failed:', err);
+  }
+}
+
+function decodeBase64Audio(base64) {
+  const binaryStr = atob(base64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function playAudioBuffer(bytes, mimeType = 'audio/wav') {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+
+  if (audioContext.state === 'suspended') {
+    await audioContext.resume();
+  }
+
+  const audioData = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+
+  try {
+    const decoded = await audioContext.decodeAudioData(audioData.slice(0));
+    await new Promise((resolve, reject) => {
+      const source = audioContext.createBufferSource();
+      activeTtsSource = source;
+      source.buffer = decoded;
+      source.connect(audioContext.destination);
+      source.onended = () => {
+        if (activeTtsSource === source) activeTtsSource = null;
+        resolve();
+      };
+      source.start(0);
+    });
+    return;
+  } catch (decodeErr) {
+    console.warn('AudioContext decode failed, fallback to HTMLAudioElement', decodeErr);
+  }
+
+  await new Promise((resolve, reject) => {
+    const blob = new Blob([bytes], { type: mimeType });
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.src = audioUrl;
+    audio.playsInline = true;
+
+    const cleanup = () => {
+      URL.revokeObjectURL(audioUrl);
+    };
+
+    audio.onended = () => {
+      cleanup();
+      resolve();
+    };
+    audio.onerror = (e) => {
+      cleanup();
+      reject(e);
+    };
+
+    audio.play().catch((err) => {
+      cleanup();
+      reject(err);
+    });
+  });
+}
+
 function speakWithWebSpeech(text) {
   return new Promise((resolve) => {
+    const synth = getSpeechSynth();
+    if (!synth || typeof SpeechSynthesisUtterance === 'undefined') {
+      setState(State.IDLE);
+      resolve();
+      return;
+    }
+
+    synth.resume?.();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
 
-    const voices = speechSynth.getVoices();
+    const voices = synth.getVoices();
     const zhVoice = voices.find(v => v.lang.startsWith('zh'));
     if (zhVoice) utterance.voice = zhVoice;
 
@@ -228,11 +338,11 @@ function speakWithWebSpeech(text) {
     utterance.onerror = () => { setState(State.IDLE); resolve(); };
 
     currentUtterance = utterance;
-    speechSynth.speak(utterance);
+    synth.speak(utterance);
 
-    if (speechSynth.getVoices().length === 0) {
-      speechSynth.onvoiceschanged = () => {
-        const v = speechSynth.getVoices().find(v => v.lang.startsWith('zh'));
+    if (synth.getVoices().length === 0) {
+      synth.onvoiceschanged = () => {
+        const v = synth.getVoices().find(v => v.lang.startsWith('zh'));
         if (v) utterance.voice = v;
       };
     }
@@ -248,24 +358,21 @@ async function speakWithMiMo(text) {
     headers['Authorization'] = `Bearer ${key}`;
   }
 
-  // 从 llmEndpoint 提取 base URL
-  const baseUrl = config.llmEndpoint.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '');
-  const ttsEndpoint = `${baseUrl}/chat/completions`;
-
+  const ttsEndpoint = config.llmEndpoint;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
+    console.log('Calling MiMo TTS at:', ttsEndpoint);
     const response = await fetch(ttsEndpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify({
         model: 'mimo-v2.5-tts',
         messages: [
-          { role: 'user', content: '请用自然的中文语音朗读以下内容。' },
           { role: 'assistant', content: text },
         ],
-        audio: { format: 'wav', voice: 'Aria' },
+        audio: { format: 'wav', voice: '冰糖' },
       }),
       signal: controller.signal,
     });
@@ -273,37 +380,29 @@ async function speakWithMiMo(text) {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      throw new Error(`TTS API ${response.status}`);
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error('MiMo TTS error response:', response.status, errorText);
+      throw new Error(`TTS API ${response.status}: ${errorText.slice(0, 200)}`);
     }
 
     const data = await response.json();
-    const audioData = data.choices?.[0]?.message?.audio?.data;
-    if (!audioData) throw new Error('No audio data in response');
+    console.log('MiMo TTS response:', data);
 
-    // 解码 base64 音频并播放
-    const binaryStr = atob(audioData);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
+    let audioData = data.choices?.[0]?.message?.audio?.data;
+
+    if (!audioData) {
+      console.error('Full response:', data);
+      throw new Error('No audio data in response');
     }
 
-    const audioBlob = new Blob([bytes], { type: 'audio/wav' });
-    const audioUrl = URL.createObjectURL(audioBlob);
-    const audio = new Audio(audioUrl);
-
-    audio.onended = () => {
-      URL.revokeObjectURL(audioUrl);
-      setState(State.IDLE);
-    };
-    audio.onerror = () => {
-      URL.revokeObjectURL(audioUrl);
-      setState(State.IDLE);
-    };
-
-    await audio.play();
+    const bytes = decodeBase64Audio(audioData);
+    await playAudioBuffer(bytes, 'audio/wav');
+    setState(State.IDLE);
   } catch (err) {
     clearTimeout(timeoutId);
-    throw err; // 让调用方处理回退
+    console.error('MiMo TTS failed:', err);
+    setState(State.IDLE);
+    throw err;
   }
 }
 
@@ -822,8 +921,9 @@ async function correctTranscript(text) {
 // 录音流程
 // ============================================================
 async function startListening() {
+  const synth = getSpeechSynth();
   if (state === State.SPEAKING) {
-    speechSynth.cancel();
+    synth?.cancel();
   }
 
   showInterim('');
@@ -896,9 +996,14 @@ async function stopListening(cancel = false) {
 // 绑定事件
 // ============================================================
 function bindEvents() {
+  const primeAudio = () => {
+    unlockAudioPlayback();
+  };
+
   // 麦克风 - 鼠标
   dom.micBtn.addEventListener('mousedown', (e) => {
     e.preventDefault();
+    primeAudio();
     if (state === State.IDLE) startListening();
   });
   dom.micBtn.addEventListener('mouseup', (e) => {
@@ -912,6 +1017,7 @@ function bindEvents() {
   // 麦克风 - 触摸
   dom.micBtn.addEventListener('touchstart', (e) => {
     e.preventDefault();
+    primeAudio();
     if (state === State.IDLE) startListening();
   }, { passive: false });
   dom.micBtn.addEventListener('touchend', (e) => {
@@ -939,6 +1045,7 @@ function bindEvents() {
 
   // 设置按钮
   dom.settingsBtn.addEventListener('click', () => {
+    primeAudio();
     dom.asrProvider.value = config.asrProvider;
     dom.llmEndpoint.value = config.llmEndpoint;
     dom.llmApiKey.value = config.llmApiKey;
@@ -980,10 +1087,14 @@ function init() {
   setState(State.IDLE);
 
   // 预加载语音
-  if ('speechSynthesis' in window) {
-    speechSynth.getVoices();
-    speechSynth.onvoiceschanged = () => speechSynth.getVoices();
+  const synth = getSpeechSynth();
+  if (synth) {
+    synth.getVoices();
+    synth.onvoiceschanged = () => synth.getVoices();
   }
+
+  document.addEventListener('touchstart', unlockAudioPlayback, { passive: true, once: true });
+  document.addEventListener('pointerdown', unlockAudioPlayback, { passive: true, once: true });
 
   // 检测移动端
   const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
