@@ -2,16 +2,30 @@
   "name": "语音智能助手",
   "short_name": "语音助手",
   "description": "基于语音识别和AI的智能对话助手",
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#0f0f23",
-  "theme_color": "#1a1a2e",
+  "background_color": "#0a0a1a",
+  "theme_color": "#0a0a1a",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%236c63ff'/%3E%3Cpath d='M96 112a28 28 0 0 0 28-28V60a28 28 0 1 0-56 0v24a28 28 0 0 0 28 28z' fill='white'/%3E%3Cpath d='M128 90v6a32 32 0 0 1-64 0v-6H48v6a48 48 0 0 0 40 47.2V164h16v-20.8A48 48 0 0 0 144 96v-6z' fill='white'/%3E%3C/svg%3E",
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23f97316'/%3E%3Cstop offset='100%25' stop-color='%23ec4899'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='512' height='512' rx='120' fill='%230a0a1a'/%3E%3Ccircle cx='256' cy='220' r='70' fill='url(%23g)'/%3E%3Cpath d='M256 300c-39.8 0-72-32.2-72-72V140c0-39.8 32.2-72 72-72s72 32.2 72 72v88c0 39.8-32.2 72-72 72z' fill='white'/%3E%3Crect x='238' y='300' width='36' height='90' rx='18' fill='white'/%3E%3Crect x='200' y='356' width='112' height='36' rx='18' fill='white' opacity='0.8'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23f97316'/%3E%3Cstop offset='100%25' stop-color='%23ec4899'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='192' height='192' rx='45' fill='%230a0a1a'/%3E%3Ccircle cx='96' cy='80' r='28' fill='url(%23g)'/%3E%3Cpath d='M96 110c-15.5 0-28-12.5-28-28V56c0-15.5 12.5-28 28-28s28 12.5 28 28v26c0 15.5-12.5 28-28 28z' fill='white'/%3E%3Crect x='88' y='110' width='16' height='40' rx='8' fill='white'/%3E%3Crect x='72' y='136' width='48' height='16' rx='8' fill='white' opacity='0.8'/%3E%3C/svg%3E",
       "sizes": "192x192",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ]
 }
