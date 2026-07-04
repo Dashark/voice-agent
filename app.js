@@ -94,6 +94,8 @@ let waveformAnimationId = null;
 let mediaStream = null;
 let asrInstance = null;
 let pendingTranscript = '';
+let audioUnlocked = false;
+let activeTtsSource = null;
 
 // ============================================================
 // 消息渲染
@@ -214,8 +216,104 @@ function speakText(text) {
   });
 }
 
+async function unlockAudioPlayback() {
+  try {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+    const buffer = audioContext.createBuffer(1, 1, 22050);
+    const source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioContext.destination);
+    source.start(0);
+    audioUnlocked = true;
+
+    if ('speechSynthesis' in window) {
+      speechSynth.resume?.();
+    }
+  } catch (err) {
+    console.warn('Audio unlock failed:', err);
+  }
+}
+
+function decodeBase64Audio(base64) {
+  const binaryStr = atob(base64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function playAudioBuffer(bytes, mimeType = 'audio/wav') {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+
+  if (audioContext.state === 'suspended') {
+    await audioContext.resume();
+  }
+
+  const audioData = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+
+  try {
+    const decoded = await audioContext.decodeAudioData(audioData.slice(0));
+    await new Promise((resolve, reject) => {
+      const source = audioContext.createBufferSource();
+      activeTtsSource = source;
+      source.buffer = decoded;
+      source.connect(audioContext.destination);
+      source.onended = () => {
+        if (activeTtsSource === source) activeTtsSource = null;
+        resolve();
+      };
+      source.start(0);
+    });
+    return;
+  } catch (decodeErr) {
+    console.warn('AudioContext decode failed, fallback to HTMLAudioElement', decodeErr);
+  }
+
+  await new Promise((resolve, reject) => {
+    const blob = new Blob([bytes], { type: mimeType });
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.src = audioUrl;
+    audio.playsInline = true;
+
+    const cleanup = () => {
+      URL.revokeObjectURL(audioUrl);
+    };
+
+    audio.onended = () => {
+      cleanup();
+      resolve();
+    };
+    audio.onerror = (e) => {
+      cleanup();
+      reject(e);
+    };
+
+    audio.play().catch((err) => {
+      cleanup();
+      reject(err);
+    });
+  });
+}
+
 function speakWithWebSpeech(text) {
   return new Promise((resolve) => {
+    if (!('speechSynthesis' in window)) {
+      setState(State.IDLE);
+      resolve();
+      return;
+    }
+
+    speechSynth.resume?.();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
     utterance.rate = 1.0;
@@ -278,38 +376,21 @@ async function speakWithMiMo(text) {
 
     const data = await response.json();
     console.log('MiMo TTS response:', data);
-    
+
     let audioData = data.choices?.[0]?.message?.audio?.data;
-    
+
     if (!audioData) {
       console.error('Full response:', data);
       throw new Error('No audio data in response');
     }
 
-    const binaryStr = atob(audioData);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
-
-    const audioBlob = new Blob([bytes], { type: 'audio/wav' });
-    const audioUrl = URL.createObjectURL(audioBlob);
-    const audio = new Audio(audioUrl);
-
-    audio.onended = () => {
-      URL.revokeObjectURL(audioUrl);
-      setState(State.IDLE);
-    };
-    audio.onerror = (e) => {
-      console.error('Audio play error:', e);
-      URL.revokeObjectURL(audioUrl);
-      setState(State.IDLE);
-    };
-
-    await audio.play();
+    const bytes = decodeBase64Audio(audioData);
+    await playAudioBuffer(bytes, 'audio/wav');
+    setState(State.IDLE);
   } catch (err) {
     clearTimeout(timeoutId);
     console.error('MiMo TTS failed:', err);
+    setState(State.IDLE);
     throw err;
   }
 }
@@ -903,9 +984,14 @@ async function stopListening(cancel = false) {
 // 绑定事件
 // ============================================================
 function bindEvents() {
+  const primeAudio = () => {
+    unlockAudioPlayback();
+  };
+
   // 麦克风 - 鼠标
   dom.micBtn.addEventListener('mousedown', (e) => {
     e.preventDefault();
+    primeAudio();
     if (state === State.IDLE) startListening();
   });
   dom.micBtn.addEventListener('mouseup', (e) => {
@@ -919,6 +1005,7 @@ function bindEvents() {
   // 麦克风 - 触摸
   dom.micBtn.addEventListener('touchstart', (e) => {
     e.preventDefault();
+    primeAudio();
     if (state === State.IDLE) startListening();
   }, { passive: false });
   dom.micBtn.addEventListener('touchend', (e) => {
@@ -946,6 +1033,7 @@ function bindEvents() {
 
   // 设置按钮
   dom.settingsBtn.addEventListener('click', () => {
+    primeAudio();
     dom.asrProvider.value = config.asrProvider;
     dom.llmEndpoint.value = config.llmEndpoint;
     dom.llmApiKey.value = config.llmApiKey;
@@ -991,6 +1079,9 @@ function init() {
     speechSynth.getVoices();
     speechSynth.onvoiceschanged = () => speechSynth.getVoices();
   }
+
+  document.addEventListener('touchstart', unlockAudioPlayback, { passive: true, once: true });
+  document.addEventListener('pointerdown', unlockAudioPlayback, { passive: true, once: true });
 
   // 检测移动端
   const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
