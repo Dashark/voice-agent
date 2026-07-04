@@ -87,7 +87,7 @@ function saveConfig() {
 let state = State.IDLE;
 let conversationHistory = [];
 let recognition = null;
-let speechSynth = window.speechSynthesis;
+let speechSynth = window.speechSynthesis || null;
 let currentUtterance = null;
 let audioContext = null;
 let waveformAnimationId = null;
@@ -96,6 +96,13 @@ let asrInstance = null;
 let pendingTranscript = '';
 let audioUnlocked = false;
 let activeTtsSource = null;
+
+function getSpeechSynth() {
+  if (!speechSynth && 'speechSynthesis' in window) {
+    speechSynth = window.speechSynthesis || null;
+  }
+  return speechSynth;
+}
 
 // ============================================================
 // 消息渲染
@@ -196,9 +203,11 @@ function speakText(text) {
   return new Promise((resolve) => {
     if (!text || !text.trim()) return resolve();
 
+    const synth = getSpeechSynth();
+
     // 停止当前播放
-    if (speechSynth.speaking) {
-      speechSynth.cancel();
+    if (synth?.speaking) {
+      synth.cancel();
     }
 
     setState(State.SPEAKING);
@@ -231,8 +240,9 @@ async function unlockAudioPlayback() {
     source.start(0);
     audioUnlocked = true;
 
-    if ('speechSynthesis' in window) {
-      speechSynth.resume?.();
+    const synth = getSpeechSynth();
+    if (synth) {
+      synth.resume?.();
     }
   } catch (err) {
     console.warn('Audio unlock failed:', err);
@@ -307,19 +317,20 @@ async function playAudioBuffer(bytes, mimeType = 'audio/wav') {
 
 function speakWithWebSpeech(text) {
   return new Promise((resolve) => {
-    if (!('speechSynthesis' in window)) {
+    const synth = getSpeechSynth();
+    if (!synth || typeof SpeechSynthesisUtterance === 'undefined') {
       setState(State.IDLE);
       resolve();
       return;
     }
 
-    speechSynth.resume?.();
+    synth.resume?.();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
 
-    const voices = speechSynth.getVoices();
+    const voices = synth.getVoices();
     const zhVoice = voices.find(v => v.lang.startsWith('zh'));
     if (zhVoice) utterance.voice = zhVoice;
 
@@ -327,11 +338,11 @@ function speakWithWebSpeech(text) {
     utterance.onerror = () => { setState(State.IDLE); resolve(); };
 
     currentUtterance = utterance;
-    speechSynth.speak(utterance);
+    synth.speak(utterance);
 
-    if (speechSynth.getVoices().length === 0) {
-      speechSynth.onvoiceschanged = () => {
-        const v = speechSynth.getVoices().find(v => v.lang.startsWith('zh'));
+    if (synth.getVoices().length === 0) {
+      synth.onvoiceschanged = () => {
+        const v = synth.getVoices().find(v => v.lang.startsWith('zh'));
         if (v) utterance.voice = v;
       };
     }
@@ -910,8 +921,9 @@ async function correctTranscript(text) {
 // 录音流程
 // ============================================================
 async function startListening() {
+  const synth = getSpeechSynth();
   if (state === State.SPEAKING) {
-    speechSynth.cancel();
+    synth?.cancel();
   }
 
   showInterim('');
@@ -1075,9 +1087,10 @@ function init() {
   setState(State.IDLE);
 
   // 预加载语音
-  if ('speechSynthesis' in window) {
-    speechSynth.getVoices();
-    speechSynth.onvoiceschanged = () => speechSynth.getVoices();
+  const synth = getSpeechSynth();
+  if (synth) {
+    synth.getVoices();
+    synth.onvoiceschanged = () => synth.getVoices();
   }
 
   document.addEventListener('touchstart', unlockAudioPlayback, { passive: true, once: true });
