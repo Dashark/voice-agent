@@ -201,10 +201,11 @@ function speakText(text) {
 
     setState(State.SPEAKING);
 
-    if (config.ttsProvider === 'mimo') {
-      speakWithMiMo(text).then(resolve).catch(() => {
+    // 只有在配置了 API Key 并且明确选择了 MiMo 时才尝试 MiMo TTS
+    if (config.ttsProvider === 'mimo' && config.llmApiKey.trim()) {
+      speakWithMiMo(text).then(resolve).catch((err) => {
         // MiMo TTS 失败时回退到 Web Speech
-        console.warn('MiMo TTS failed, falling back to Web Speech');
+        console.warn('MiMo TTS failed, falling back to Web Speech', err);
         speakWithWebSpeech(text).then(resolve);
       });
     } else {
@@ -248,24 +249,21 @@ async function speakWithMiMo(text) {
     headers['Authorization'] = `Bearer ${key}`;
   }
 
-  // 从 llmEndpoint 提取 base URL
-  const baseUrl = config.llmEndpoint.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '');
-  const ttsEndpoint = `${baseUrl}/chat/completions`;
-
+  const ttsEndpoint = config.llmEndpoint;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
+    console.log('Calling MiMo TTS at:', ttsEndpoint);
     const response = await fetch(ttsEndpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify({
         model: 'mimo-v2.5-tts',
         messages: [
-          { role: 'user', content: '请用自然的中文语音朗读以下内容。' },
           { role: 'assistant', content: text },
         ],
-        audio: { format: 'wav', voice: 'Aria' },
+        audio: { format: 'wav', voice: '冰糖' },
       }),
       signal: controller.signal,
     });
@@ -273,14 +271,21 @@ async function speakWithMiMo(text) {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      throw new Error(`TTS API ${response.status}`);
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error('MiMo TTS error response:', response.status, errorText);
+      throw new Error(`TTS API ${response.status}: ${errorText.slice(0, 200)}`);
     }
 
     const data = await response.json();
-    const audioData = data.choices?.[0]?.message?.audio?.data;
-    if (!audioData) throw new Error('No audio data in response');
+    console.log('MiMo TTS response:', data);
+    
+    let audioData = data.choices?.[0]?.message?.audio?.data;
+    
+    if (!audioData) {
+      console.error('Full response:', data);
+      throw new Error('No audio data in response');
+    }
 
-    // 解码 base64 音频并播放
     const binaryStr = atob(audioData);
     const bytes = new Uint8Array(binaryStr.length);
     for (let i = 0; i < binaryStr.length; i++) {
@@ -295,7 +300,8 @@ async function speakWithMiMo(text) {
       URL.revokeObjectURL(audioUrl);
       setState(State.IDLE);
     };
-    audio.onerror = () => {
+    audio.onerror = (e) => {
+      console.error('Audio play error:', e);
       URL.revokeObjectURL(audioUrl);
       setState(State.IDLE);
     };
@@ -303,7 +309,8 @@ async function speakWithMiMo(text) {
     await audio.play();
   } catch (err) {
     clearTimeout(timeoutId);
-    throw err; // 让调用方处理回退
+    console.error('MiMo TTS failed:', err);
+    throw err;
   }
 }
 
